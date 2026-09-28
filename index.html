@@ -6,6 +6,8 @@
   <title>WonderSnap</title>
   <meta name="description" content="Gesture-controlled 3D wonders, engines and cars made of glowing GPU particles.">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='22' fill='none' stroke='%2366e0ff' stroke-width='4'/%3E%3Ccircle cx='32' cy='32' r='8' fill='%23ffd166'/%3E%3C/svg%3E">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#070b14">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -17,7 +19,7 @@
     <div class="logo" aria-hidden="true"><span></span></div>
     <div>
       <div class="brand-name">WonderSnap</div>
-      <div class="brand-sub">snap · form · explode — with your hand</div>
+      <div class="brand-sub" data-i18n="brand.sub">snap · form · explode — with your hand</div>
     </div>
   </header>
 
@@ -30,32 +32,32 @@
 
     <section class="status">
       <div class="row">
-        <span class="k">Scene</span><span id="statePill" class="pill" data-state="idle">idle</span>
+        <span class="k" data-i18n="k.scene">Scene</span><span id="statePill" class="pill" data-state="idle">idle</span>
       </div>
       <div class="row">
-        <span class="k">Hand</span><span id="posePill" class="pill pose">no hand</span>
+        <span class="k" data-i18n="k.hand">Hand</span><span id="posePill" class="pill pose">no hand</span>
       </div>
       <div class="meter">
-        <div class="meter-head"><span class="k">Hand openness</span><b id="openPct">0%</b></div>
+        <div class="meter-head"><span class="k" data-i18n="k.openness">Hand openness</span><b id="openPct">0%</b></div>
         <div class="bar"><i id="openBar"></i></div>
       </div>
       <div id="explodeBox" class="meter explode" hidden>
-        <div class="meter-head"><span class="k">Exploded view</span><b id="explodePct">0%</b></div>
+        <div class="meter-head"><span class="k" data-i18n="k.exploded">Exploded view</span><b id="explodePct">0%</b></div>
         <input id="explodeSlider" type="range" min="0" max="100" value="0" aria-label="Exploded view amount">
-        <div class="hint">Open your hand to pull it apart · close it to assemble</div>
+        <div class="hint" data-i18n="hint.explode">Open your hand to pull it apart · close it to assemble</div>
       </div>
     </section>
 
     <section>
-      <div class="k">Gestures</div>
+      <div class="k" data-i18n="k.gestures">Gestures</div>
       <ul id="guide" class="guide"></ul>
     </section>
 
     <section class="buttons">
-      <button id="bSnap" title="Space">🫰 Snap</button>
-      <button id="bForm" title="F">✊ Form</button>
-      <button id="bOpen" title="O">✋ Release</button>
-      <button id="bNext" title="V / →">✌ Next</button>
+      <button id="bSnap" title="Space" data-i18n="btn.snap">🫰 Snap</button>
+      <button id="bForm" title="F" data-i18n="btn.form">✊ Form</button>
+      <button id="bOpen" title="O" data-i18n="btn.open">✋ Release</button>
+      <button id="bNext" title="V / →" data-i18n="btn.next">✌ Next</button>
     </section>
   </aside>
 
@@ -70,8 +72,8 @@
     <div class="phead"><i class="swatch"></i><span class="pname"></span><button id="partClose" class="x" title="Close (Esc)">✕</button></div>
     <div class="pinfo"></div>
     <div class="pmodel"></div>
-    <div class="pactions"><button id="partPull">🤏 Pull out</button><button id="partSpeak">🔊 Read aloud</button></div>
-    <div class="phint">Point ☝ at another part · pinch 🤏 to pull this one out</div>
+    <div class="pactions"><button id="partPull" data-i18n="part.pull">🤏 Pull out</button><button id="partSpeak" data-i18n="part.speak">🔊 Read aloud</button></div>
+    <div class="phint" data-i18n="part.hint">Point ☝ at another part · pinch 🤏 to pull this one out</div>
   </section>
 
   <section id="quiz" class="quiz glass" hidden aria-live="polite">
@@ -82,17 +84,37 @@
   <div class="top-right">
     <div id="stats" class="stats glass"></div>
     <div class="icons">
-      <button id="bCam" class="icon" title="Camera on/off (C)">📷</button>
-      <button id="bLabels" class="icon on" title="Part labels (L)">🏷️</button>
-      <button id="bRotate" class="icon on" title="Auto-rotate (R)">⟳</button>
-      <button id="bHandRot" class="icon on" title="Hand rotation: twist your hand to turn the model (G)">🔄</button>
-      <button id="bCut" class="icon" title="Cut-away cross-section (X)">✂</button>
-      <button id="bQuiz" class="icon" title="Quiz: find the part (Q)">🎓</button>
-      <button id="bVoice" class="icon" title="Voice commands + read aloud (M)">🎤</button>
-      <button id="bRec" class="icon" title="Record a video (K)">⏺</button>
-      <button id="bDemo" class="icon" title="Play demo (D)">▶</button>
-      <button id="bHelp" class="icon" title="Keyboard help (H)">?</button>
+      <button id="bCam" class="icon" title="Camera on/off (C)" data-i18n-title="title.cam">📷</button>
+      <button id="bLabels" class="icon on" title="Part labels (L)" data-i18n-title="title.labels">🏷️</button>
+      <button id="bRotate" class="icon on" title="Auto-rotate (R)" data-i18n-title="title.rotate">⟳</button>
+      <button id="bHandRot" class="icon on" title="Hand rotation: twist your hand to turn the model (G)" data-i18n-title="title.handrot">🔄</button>
+      <button id="bCut" class="icon" title="Cut-away cross-section (X)" data-i18n-title="title.cut">✂</button>
+      <button id="bQuiz" class="icon" title="Quiz: find the part (Q)" data-i18n-title="title.quiz">🎓</button>
+      <button id="bVoice" class="icon" title="Voice commands + read aloud (M)" data-i18n-title="title.voice">🎤</button>
+      <button id="bSound" class="icon" title="Sound effects (S)" data-i18n-title="title.sound">🔊</button>
+      <button id="bRec" class="icon" title="Record a video (K)" data-i18n-title="title.rec">⏺</button>
+      <button id="bDemo" class="icon" title="Play demo (D)" data-i18n-title="title.demo">▶</button>
+      <button id="bLang" class="icon" title="العربية / English">🌐</button>
+      <button id="bSettings" class="icon" title="Settings" data-i18n-title="title.settings">⚙</button>
+      <button id="bHelp" class="icon" title="Keyboard help (H)" data-i18n-title="title.help">?</button>
     </div>
+  </div>
+
+  <div id="settings" class="settings glass" hidden>
+    <h2 data-i18n="set.title">Settings</h2>
+    <div class="srow"><span class="k" data-i18n="set.lang">Language</span>
+      <div class="seg" id="setLang"><button data-lang="en">English</button><button data-lang="ar">العربية</button></div>
+    </div>
+    <div class="srow"><span class="k" data-i18n="set.particles">Particles</span>
+      <div class="seg" id="setN">
+        <button data-n="50000">50k</button><button data-n="100000">100k</button>
+        <button data-n="200000">200k</button><button data-n="250000">250k</button>
+      </div>
+    </div>
+    <label class="srow check"><input type="checkbox" id="setSound"><span data-i18n="set.sound">Sound effects</span></label>
+    <label class="srow check"><input type="checkbox" id="setAutoQ"><span data-i18n="set.autoq">Auto quality (lowers render scale when slow)</span></label>
+    <label class="srow check"><input type="checkbox" id="setTrails"><span data-i18n="set.trails">Particle trails</span></label>
+    <p class="shint" data-i18n="set.reload">Changing the particle count reloads the page</p>
   </div>
 
   <div id="help" class="help glass" hidden>
@@ -108,7 +130,7 @@
       <tr><td><kbd>X</kbd> <kbd>,</kbd> <kbd>.</kbd></td><td>Cut-away slice (move hand / mouse)</td></tr>
       <tr><td><kbd>Q</kbd> <kbd>M</kbd> <kbd>K</kbd> <kbd>I</kbd></td><td>Quiz · voice · record video · describe part</td></tr>
       <tr><td>drag</td><td>Rotate the model</td></tr>
-      <tr><td><kbd>R</kbd> <kbd>L</kbd> <kbd>T</kbd></td><td>Auto-rotate · labels · trails</td></tr>
+      <tr><td><kbd>R</kbd> <kbd>L</kbd> <kbd>T</kbd> <kbd>S</kbd></td><td>Auto-rotate · labels · trails · sound</td></tr>
       <tr><td><kbd>C</kbd> <kbd>D</kbd> <kbd>H</kbd></td><td>Camera · demo · this help</td></tr>
     </table>
   </div>
@@ -119,7 +141,7 @@
     <div class="start-card glass">
       <div class="logo big" aria-hidden="true"><span></span></div>
       <h1>WonderSnap</h1>
-      <p>Glowing 3D wonders, the human body (brain, beating heart, breathing lungs, eye, ear, skeleton…), DNA, a cell, engines, vehicles and machines made of up to a quarter-million light particles — controlled by your hand in front of the webcam.</p>
+      <p data-i18n="start.p">Glowing 3D wonders, the human body (brain, beating heart, breathing lungs, eye, ear, skeleton…), DNA, a cell, engines, vehicles and machines made of up to a quarter-million light particles — controlled by your hand in front of the webcam.</p>
       <ol class="steps">
         <li><b>Snap</b> your fingers to summon the particles.</li>
         <li>Make a <b>fist</b> to form a wonder, engine or car.</li>
@@ -129,8 +151,8 @@
         <li>Show <b>✌</b> to jump to the next model.</li>
       </ol>
       <div class="start-buttons">
-        <button id="bStartCam" class="primary">Start with camera</button>
-        <button id="bStartNoCam">Continue without camera</button>
+        <button id="bStartCam" class="primary" data-i18n="start.cam">Start with camera</button>
+        <button id="bStartNoCam" data-i18n="start.nocam">Continue without camera</button>
       </div>
       <p id="startMsg" class="start-msg"></p>
     </div>

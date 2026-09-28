@@ -234,3 +234,31 @@ test('point & pinch poses, and the voice-command parser', async ({ page }) => {
   expect(r.cmds.m).toEqual(['Aorta']);
   expect(r.cmds.n).toEqual(['explode', 'cut']);
 });
+
+test('the voice-command parser understands Arabic', async ({ page }) => {
+  const r = await page.evaluate(async () => {
+    const { parseCommand } = await import('/src/features.js');
+    const { CATALOG } = await import('/src/models/catalog.js');
+    const say = (t) => parseCommand(t, CATALOG).map((a) => (a.type === 'model' ? a.name : a.type));
+    return {
+      a: say('أرني القلب'), b: say('ورّيني الدماغ وفككه'), c: say('التالي'), d: say('ارجع للسابق'),
+      e: say('اختبرني'), f: say('أوقف الاختبار'), g: say('كبّر الصورة'), h: say('جمّعه من جديد'),
+      i: say('اذهب إلى الصاروخ'), j: say('ما هذا؟'), k: say('اعرض الهرم الأكبر'), l: say('امسح كل شيء'),
+      m: say('برج خليفة'), n: say('كلام عشوائي تماما'),
+    };
+  });
+  expect(r.a).toEqual(['Human Heart']);
+  expect(r.b).toEqual(['Human Brain', 'explode']);
+  expect(r.c).toEqual(['next']);
+  expect(r.d).toEqual(['prev']);
+  expect(r.e).toEqual(['quiz']);
+  expect(r.f).toEqual(['stopQuiz']);
+  expect(r.g).toEqual(['zoomIn']);
+  expect(r.h).toEqual(['assemble']);
+  expect(r.i).toEqual(['Saturn V Rocket']);
+  expect(r.j).toEqual(['describe']);
+  expect(r.k).toEqual(['Great Pyramid']);
+  expect(r.l).toEqual(['dissolve']);
+  expect(r.m).toEqual(['Burj Khalifa']);
+  expect(r.n).toEqual([]);
+});

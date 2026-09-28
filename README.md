@@ -1,6 +1,7 @@
 # WonderSnap
 
 **Gesture-controlled 3D models made of glowing light particles, running entirely in your browser.**
+**English + العربية** — the whole UI, the voice commands and the read-aloud work in both languages.
 
 Snap your fingers in front of your webcam and up to 250,000 GPU particles swirl into existence. Make a fist and they
 form the Eiffel Tower, a beating heart or a V8 engine. Open your hand and the model morphs into the next one, or
@@ -67,6 +68,7 @@ Nothing is sent anywhere: the video never leaves your machine.
 | `X` | Cut-away cross-section (`,` and `.` nudge the plane) |
 | `Q` | Quiz mode |
 | `M` | Voice commands and read-aloud |
+| `S` | Sound effects (heartbeat, snap, explosions) |
 | `K` | Record a video |
 | `D` | Play the demo |
 | `I` / `Esc` | Describe / deselect the selected part |
@@ -84,6 +86,16 @@ Click a part to select it, drag to rotate.
   Parts are read aloud with speech synthesis (Chrome or Edge).
 - **Cut-away.** A cutting plane follows your hand and reveals a glowing cross-section.
 - **Recording.** Save a WebM video of the scene.
+- **Arabic (العربية).** Click 🌐 (or add `?lang=ar`): the UI flips to RTL Arabic, model names and facts are
+  translated, parts are read aloud in Arabic, and the voice commands understand Arabic — «أرني القلب»، «فكّكه»،
+  «التالي»، «اختبرني».
+- **Sound effects.** Press `S` or click 🔊: a synthesized heartbeat in phase with the visual pulse, snap /
+  form / dissolve effects and quiz feedback — all Web Audio, no audio files.
+- **Auto quality.** When the frame rate drops, the render scale is lowered step by step (and restored when
+  it recovers), so the app stays smooth on slower GPUs. Turn it off in ⚙ Settings or with `?autoq=0`.
+- **Settings panel.** ⚙ — language, particle count, sound, auto quality and trails, persisted across visits.
+- **Installable / offline (PWA).** A service worker caches everything after the first visit (network-first,
+  so updates are never stale), and the app can be installed from the browser.
 
 ## Models
 
@@ -105,11 +117,19 @@ Click a part to select it, drag to rotate.
 | `?autostart=camera` / `?autostart=nocamera` | Skip the start screen |
 | `?trails=0` | Turn off particle trails |
 | `?dpr=1` | Force the device pixel ratio (useful on slower GPUs) |
+| `?lang=ar` / `?lang=en` | Language (also the 🌐 button) |
+| `?autoq=0` | Disable adaptive quality |
+
+## Deploying online
+
+`node build.mjs` produces a self-contained static bundle in `dist/` (the MediaPipe runtime is vendored out of
+`node_modules`), ready for any static host. A GitHub Actions workflow (`.github/workflows/deploy.yml`) deploys it
+to **GitHub Pages** on every push to `main` — one-time setup: repository *Settings → Pages → Source: GitHub Actions*.
 
 ## Tests
 
-36 end-to-end and unit tests with [Playwright](https://playwright.dev/), driving the real app with synthetic hands on
-a deterministic clock.
+37 end-to-end and unit tests with [Playwright](https://playwright.dev/), driving the real app with synthetic hands on
+a deterministic clock. They run automatically on every push via GitHub Actions (`.github/workflows/ci.yml`).
 
 ```bash
 npx playwright install chromium   # one time
@@ -122,7 +142,7 @@ npm test
 | `features.spec.js` | Heartbeat and breathing, two-hand zoom, point-to-pick, pinch-to-pull, quiz, voice commands, cut-away, video recording |
 | `camera.spec.js` | Real `getUserMedia` to MediaPipe on Chromium's fake webcam, plus the camera-denied fallback |
 | `gpu.spec.js` | The GPU physics shader matches its CPU twin to ~1e-7 in every mode |
-| `logic.spec.js` | Pose classifiers, snap detector, debouncer, state machine, controller, voice-command parser |
+| `logic.spec.js` | Pose classifiers, snap detector, debouncer, state machine, controller, voice-command parser (English + Arabic) |
 | `models.spec.js` | Every model is deterministic, finite and fast, with real measurements and correctly exploding parts |
 
 ## Project structure
@@ -130,15 +150,20 @@ npm test
 ```
 index.html, styles.css     page and styles
 server.mjs                 zero-dependency static server
+build.mjs                  static bundle for deployment (vendors the MediaPipe runtime)
+manifest.webmanifest, sw.js, icons/   PWA: installable + offline
 models/                    MediaPipe hand landmark model
 src/app.js                 render loop, explode, zoom, picking, quiz, cut-away, HUD, labels, demo
 src/hands.js               webcam + MediaPipe Hand Landmarker
-src/features.js            voice commands, read-aloud, video recorder
+src/features.js            voice commands (EN + AR), read-aloud, video recorder
+src/i18n.js                English / Arabic strings, model-name translations, RTL
+src/audio.js               synthesized sound effects (Web Audio)
 src/gl/                    WebGL2 shaders and renderer (transform-feedback physics)
 src/logic/                 gestures, state machine, controller, CPU physics twin
 src/lib/                   vector math, samplers, procedural shapes
 src/models/                wonders, anatomy, biology, engines, vehicles, machines
 tests/                     Playwright specs
+.github/workflows/         CI (Playwright) + deploy to GitHub Pages
 ```
 
 ## Troubleshooting
