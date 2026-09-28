@@ -9,3 +9,4 @@ screenshots/
 Thumbs.db
 *.log
 .env
+dist/

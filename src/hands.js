@@ -1,5 +1,7 @@
 // Webcam + MediaPipe HandLandmarker (Tasks API, VIDEO mode). The render loop calls poll() once per frame;
 // detection only runs when the camera delivered a new frame, and timestamps strictly increase.
+import { t } from './i18n.js';
+
 const VISION = '../node_modules/@mediapipe/tasks-vision/vision_bundle.mjs';
 const WASM = 'node_modules/@mediapipe/tasks-vision/wasm';
 const MODEL = 'models/hand_landmarker.task';
@@ -22,12 +24,12 @@ export class HandCamera {
 
   async start(onStatus = () => {}) {
     if (!navigator.mediaDevices?.getUserMedia) throw new Error('This browser cannot access a camera (getUserMedia missing — use https or localhost).');
-    onStatus('Requesting camera…');
+    onStatus(t('cam.requesting'));
     this.stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user', frameRate: { ideal: 30 } }, audio: false });
     this.video.srcObject = this.stream;
     this.video.muted = true; this.video.playsInline = true;
     await this.video.play();
-    onStatus('Loading hand tracker…');
+    onStatus(t('cam.loading'));
     const { FilesetResolver, HandLandmarker } = await import(VISION);
     const fileset = await FilesetResolver.forVisionTasks(WASM);
     const make = (delegate) => HandLandmarker.createFromOptions(fileset, {

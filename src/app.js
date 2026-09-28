@@ -11,8 +11,12 @@ import { HandCamera } from './hands.js';
 import { hand as synthHand } from './logic/synth.js';
 import { rotX, rotY, matMul, matVec, deg } from './lib/vec.js';
 import { parseCommand, Voice, speak, Recorder } from './features.js';
+import { LANG, t as tr, modelName, modelFact, catName, applyStatic, setLang } from './i18n.js';
+import { Sound } from './audio.js';
 
 const qs = new URLSearchParams(location.search);
+const pref = (k) => { try { return localStorage.getItem(k); } catch { return null; } };
+const SPEAK_LANG = LANG === 'ar' ? 'ar' : undefined;
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const smooth = (a, b, x) => { const t = clamp((x - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
 const wrapPi = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -22,17 +26,18 @@ const DWELL_S = 0.45;          // point at a part this long to select it
 const QUIZ_LEN = 5;
 
 const CFG = {
-  n: clamp(parseInt(qs.get('n'), 10) || 200000, 5000, 1000000),
+  n: clamp(parseInt(qs.get('n'), 10) || parseInt(pref('ws.n'), 10) || 200000, 5000, 1000000),
   manual: qs.get('manual') === '1',             // tests: deterministic clock, frames only via wonderSnap.advance()
   autostart: qs.get('autostart'),                // 'camera' | 'nocamera'
   start: clamp(parseInt(qs.get('model'), 10) || 0, 0, CATALOG.length - 1),
   dpr: qs.get('dpr') ? parseFloat(qs.get('dpr')) : Math.min(window.devicePixelRatio || 1, 2),
   trails: qs.get('trails') !== '0',
 };
+CFG.autoq = qs.get('autoq') !== '0' && !qs.get('dpr') && !CFG.manual && pref('ws.autoq') !== '0';
 
 const HAND_EDGES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [5, 9], [9, 10], [10, 11], [11, 12],
   [9, 13], [13, 14], [14, 15], [15, 16], [13, 17], [17, 18], [18, 19], [19, 20], [0, 17]];
-const POSE_UI = { [OPEN]: ['✋', 'Open hand'], [FIST]: ['✊', 'Fist'], [PEACE]: ['✌', 'Peace'], [POINT]: ['☝', 'Pointing'], other: ['🤚', 'Moving'], [NONE]: ['·', 'No hand'] };
+const POSE_UI = { [OPEN]: ['✋', tr('pose.open')], [FIST]: ['✊', tr('pose.fist')], [PEACE]: ['✌', tr('pose.peace')], [POINT]: ['☝', tr('pose.point')], other: ['🤚', tr('pose.moving')], [NONE]: ['·', tr('pose.none')] };
 const POSE_COLOR = { [OPEN]: '#66e0ff', [FIST]: '#ffd166', [PEACE]: '#ff6bd6', [POINT]: '#7dff9b', other: '#e8f1ff', [NONE]: '#e8f1ff' };
 const rgbCss = (c, a = 1) => `rgba(${Math.round(c[0] * 255)}, ${Math.round(c[1] * 255)}, ${Math.round(c[2] * 255)}, ${a})`;
 const CATEGORIES = [...new Set(CATALOG.map((d) => d.category))];
@@ -131,8 +136,10 @@ class App {
     this.sel = -1; this.pulled = false; this.pullAmt = 0; this.hover = { li: -1, t0: 0 }; this.anchors = []; this.pointer = null; this.lostT = 0;
     this.quiz = null;
     this.cut = { on: false, x: 0.35, target: 0.35 };
-    this.voice = new Voice((text) => this.voiceCommand(text)); this.voiceOn = false; this.spoken = []; this.lastHeard = '';
+    this.voice = new Voice((text) => this.voiceCommand(text), LANG === 'ar' ? 'ar-EG' : 'en-US'); this.voiceOn = false; this.spoken = []; this.lastHeard = '';
     this.recorder = new Recorder(this.canvas, this.overlay); this.lastRecording = null;
+    this.sound = new Sound(); if (CFG.manual) this.sound.enabled = false;
+    this.baseDpr = CFG.dpr; this.autoQ = { on: CFG.autoq, level: 0, bad: 0, good: 0 };
     this.t = 0; this.last = null; this.frames = 0; this.fps = 0; this._fpsN = 0; this._fpsT = 0;
     this.handSource = null; this.handSource2 = null; this.lastSynthT = -1; this.demo = null; this.demoHand = undefined;
     this.autoFormAt = null; this.hudTick = 0; this.lastIndexShown = -1; this.sliderActive = false;
@@ -140,6 +147,10 @@ class App {
     this.gain = clamp(0.22 * Math.sqrt(250000 / CFG.n), 0.15, 0.6);
     this.resize();
     addEventListener('resize', () => this.resize());
+    // autoplay policy: the AudioContext can only start after a user gesture
+    const wake = () => { if (this.sound.enabled) this.sound.ensure(); };
+    addEventListener('pointerdown', wake, { once: true });
+    addEventListener('keydown', wake, { once: true });
     this.buildUI();
     this.bindInput();
     this.store.request(CFG.start).then(() => this.prefetch());
@@ -156,6 +167,22 @@ class App {
     this.dist = Math.max(3.4, 1.25 / (Math.tan((20 * Math.PI) / 180) * aspect));
     this.proj = perspective(40, aspect, 0.05, 30);
     this.projView = mul4(this.proj, translate4(this.offX, this.offY, -this.dist));
+  }
+
+  // ------------------------------------------------------------ adaptive quality
+  // Called once per second: a sustained low frame rate lowers the render scale (device pixel ratio),
+  // a sustained high one restores it. Hysteresis on both sides so it never oscillates.
+  autoQuality() {
+    const q = this.autoQ;
+    if (this.fps < 45) { q.bad++; q.good = 0; } else if (this.fps > 56) { q.good++; q.bad = 0; } else { q.bad = 0; q.good = 0; }
+    if (q.bad >= 3 && q.level < 3) { q.level++; q.bad = 0; this.applyQuality(false); }
+    else if (q.good >= 15 && q.level > 0) { q.level--; q.good = 0; this.applyQuality(true); }
+  }
+  applyQuality(up) {
+    const scale = [1, 0.8, 0.65, 0.5][this.autoQ.level];
+    CFG.dpr = Math.max(0.5, this.baseDpr * scale);
+    this.resize();
+    this.toast(tr(up ? 'toast.qualityUp' : 'toast.quality', Math.round(scale * 100)));
   }
 
   // ------------------------------------------------------------ frame
@@ -256,6 +283,7 @@ class App {
       pulse = 1 + def.breath.amp * 0.5 * (1 - Math.cos((2 * Math.PI * t) / def.breath.period)); flow = 0.6;
     }
     this.pulse = 1 + (pulse - 1) * life; this.flow = flow * life;
+    this.sound.tick(t, def, formed && life > 0.3);                          // heartbeat / breathing audio in phase
 
     const m = ready ? this.model : null;
     this.scale = m ? 1 + (m.fitScale - 1) * this.explode : 1;
@@ -297,7 +325,7 @@ class App {
     this.drawOverlay(t, machine, formT, pointing);
     this.recorder.frame();
     this.frames++; this._fpsN++;
-    if (t - this._fpsT >= 1) { this.fps = this._fpsN / (t - this._fpsT); this._fpsN = 0; this._fpsT = t; }
+    if (t - this._fpsT >= 1) { this.fps = this._fpsN / (t - this._fpsT); this._fpsN = 0; this._fpsT = t; if (this.autoQ.on && t > 6) this.autoQuality(); }
     if (++this.hudTick % 3 === 0 || CFG.manual) this.updateHud(t, formT);
   }
 
@@ -337,7 +365,7 @@ class App {
     } else this.hover = { li: -1, t0: t };
     if (ctl.pinchStart) {
       ctl.pinchStart = false;
-      if (this.sel >= 0) { this.pulled = !this.pulled; this.toast(this.pulled ? `🤏 Pulled out: ${this.model.labels[this.sel].label}` : '🤏 Put back'); }
+      if (this.sel >= 0) { this.pulled = !this.pulled; this.sound.pull(); this.toast(this.pulled ? tr('toast.pulled', this.model.labels[this.sel].label) : tr('toast.putBack')); }
     }
   }
   selectPart(li, source = 'click') {
@@ -345,11 +373,12 @@ class App {
     if (this.quiz && !this.quiz.done && this.quiz.phase === 'ask') { this.answerQuiz(li); return; }
     this.sel = li; this.pulled = false;
     const L = this.model.labels[li];
+    this.sound.pick();
     this.say(`${L.label}. ${L.info}.`);
-    this.toast(`☝ ${L.label} — ${L.info}`);
+    this.toast(tr('toast.part', L.label, L.info));
   }
   deselect() { this.sel = -1; this.pulled = false; }
-  say(text) { this.spoken.push(text); if (this.voiceOn) speak(text); }
+  say(text) { this.spoken.push(text); if (this.voiceOn) speak(text, SPEAK_LANG); }
 
   // ------------------------------------------------------------ quiz: "find the hippocampus"
   startQuiz() {
@@ -358,7 +387,7 @@ class App {
     else if (st.state !== FORMED) this.selectModel(st.index);
     this.quiz = { pending: true, total: QUIZ_LEN, asked: 0, score: 0, target: -1, phase: 'wait', nextAt: 0, done: false, feedback: '', seed: this.frames };
     this.manualExplode = 1;
-    this.toast('🎓 Quiz: point at the part I name');
+    this.toast(tr('toast.quizStart'));
   }
   stopQuiz() { this.quiz = null; this.deselect(); }
   updateQuiz(t, ready) {
@@ -379,21 +408,22 @@ class App {
     this.deselect();
     if (q.asked >= q.total) {
       q.done = true; q.phase = 'done'; q.nextAt = this.t;
-      q.feedback = `🏆 Score ${q.score} / ${q.total}`;
-      this.say(`Quiz finished. You scored ${q.score} out of ${q.total}.`);
+      q.feedback = tr('quiz.score', q.score, q.total);
+      this.say(tr('quiz.sayDone', q.score, q.total));
       return;
     }
     q.target = q.order[q.asked % q.order.length]; q.asked++; q.phase = 'ask'; q.feedback = '';
-    this.say(`Find the ${this.model.labels[q.target].label}`);
+    this.say(tr('quiz.sayFind', this.model.labels[q.target].label));
   }
   answerQuiz(li) {
     const q = this.quiz, L = this.model.labels;
     const ok = li === q.target;
     if (ok) q.score++;
+    if (ok) this.sound.correct(); else this.sound.wrong();
     q.phase = 'feedback'; q.nextAt = this.t + 1.8;
-    q.feedback = ok ? `✅ Correct! ${L[li].label}: ${L[li].info}` : `❌ That's the ${L[li].label}. Here is the ${L[q.target].label}.`;
+    q.feedback = ok ? tr('quiz.correct', L[li].label, L[li].info) : tr('quiz.wrong', L[li].label, L[q.target].label);
     this.sel = q.target;                                                // reveal the right answer
-    this.say(ok ? `Correct! ${L[li].info}` : `No, that's the ${L[li].label}.`);
+    this.say(ok ? tr('quiz.sayCorrect', L[li].info) : tr('quiz.sayWrong', L[li].label));
   }
 
   // ------------------------------------------------------------ voice
@@ -422,24 +452,31 @@ class App {
         this.say(L ? `${L.label}. ${L.info}.` : `${CATALOG[st.index].name}. ${CATALOG[st.index].fact || ''}`); done.push('describe');
       }
     }
-    this.toast(`🎤 “${text}”${done.length ? ' → ' + done.join(', ') : ' (not understood)'}`);
+    this.toast(tr('toast.heard', text, done.join(', ')));
     return done;
   }
   toggleVoice() {
-    if (this.voiceOn) { this.voice.stop(); this.voiceOn = false; this.toast('🎤 Voice off'); }
+    if (this.voiceOn) { this.voice.stop(); this.voiceOn = false; this.toast(tr('toast.voiceOff')); }
     else {
       this.voiceOn = true;
       const ok = this.voice.start();
-      this.toast(ok ? '🎤 Listening: say “show me the heart”, “explode”, “next”, “quiz”…' : '🎤 Speech recognition is not available here: parts are still read aloud');
+      this.toast(ok ? tr('toast.voiceOn') : tr('toast.voiceNA'));
     }
     this.$('bVoice').classList.toggle('on', this.voiceOn);
   }
+  toggleSound() {
+    this.sound.setEnabled(!this.sound.enabled);
+    this.$('bSound').classList.toggle('on', this.sound.enabled);
+    this.updateSettingsUI();
+    this.toast(tr(this.sound.enabled ? 'toast.soundOn' : 'toast.soundOff'));
+    if (this.sound.enabled) this.sound.blip();
+  }
 
   // ------------------------------------------------------------ cut-away + recording
-  toggleCut() { this.cut.on = !this.cut.on; this.$('bCut').classList.toggle('on', this.cut.on); this.toast(this.cut.on ? '✂ Cut-away: move your hand (or the mouse) left / right' : '✂ Cut-away off'); }
+  toggleCut() { this.cut.on = !this.cut.on; this.$('bCut').classList.toggle('on', this.cut.on); this.toast(this.cut.on ? tr('toast.cutOn') : tr('toast.cutOff')); }
   async toggleRecord() {
-    if (!Recorder.supported()) { this.toast('Recording is not supported in this browser'); return; }
-    if (!this.recorder.on) { this.recorder.start(); this.$('bRec').classList.add('on'); this.toast('⏺ Recording…'); return; }
+    if (!Recorder.supported()) { this.toast(tr('toast.recNA')); return; }
+    if (!this.recorder.on) { this.recorder.start(); this.$('bRec').classList.add('on'); this.toast(tr('toast.recOn')); return; }
     const blob = await this.recorder.stop();
     this.$('bRec').classList.remove('on');
     if (!blob) return;
@@ -449,7 +486,7 @@ class App {
     a.download = `wondersnap-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.webm`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
-    this.toast(`💾 Saved ${(blob.size / 1e6).toFixed(1)} MB video`);
+    this.toast(tr('toast.recSaved', (blob.size / 1e6).toFixed(1)));
   }
 
   // ------------------------------------------------------------ overlay: hands, pointer, labels
@@ -496,7 +533,7 @@ class App {
         g.shadowBlur = 0; g.setLineDash([6 * dpr, 6 * dpr]); g.strokeStyle = '#b69cff'; g.globalAlpha = 0.8; g.lineWidth = 2 * dpr;
         g.beginPath(); g.moveTo(a[0], a[1]); g.lineTo(b[0], b[1]); g.stroke(); g.setLineDash([]);
         g.fillStyle = '#e8dcff'; g.font = `700 ${13 * dpr}px ui-sans-serif, system-ui, sans-serif`; g.textAlign = 'center';
-        g.fillText(`🔍 zoom ${this.zoom.toFixed(2)}×`, (a[0] + b[0]) / 2, (a[1] + b[1]) / 2 - 12 * dpr);
+        g.fillText(tr('ov.zoom', this.zoom.toFixed(2)), (a[0] + b[0]) / 2, (a[1] + b[1]) / 2 - 12 * dpr);
       }
       g.shadowBlur = 0; g.globalAlpha = 1;
     }
@@ -517,7 +554,7 @@ class App {
       g.strokeStyle = '#ffffff'; g.globalAlpha = 0.5; g.setLineDash([8 * dpr, 6 * dpr]); g.lineWidth = 1.5 * dpr;
       g.beginPath(); g.moveTo(x, cy - rr * 1.1); g.lineTo(x, cy + rr * 1.1); g.stroke(); g.setLineDash([]);
       g.globalAlpha = 0.9; g.fillStyle = '#fff'; g.font = `600 ${12 * dpr}px ui-sans-serif, system-ui, sans-serif`; g.textAlign = 'center';
-      g.fillText('✂ cross-section', x, cy - rr * 1.1 - 8 * dpr); g.globalAlpha = 1;
+      g.fillText(tr('ov.cut'), x, cy - rr * 1.1 - 8 * dpr); g.globalAlpha = 1;
     }
     if (!this.anchors.length) return;
     const showAll = this.labelsOn && this.explode > 0.15;
@@ -561,14 +598,14 @@ class App {
     this.tabs = {}; this.chips = [];
     for (const c of CATEGORIES) {
       const b = document.createElement('button');
-      b.className = 'tab'; b.textContent = `${c} · ${CATALOG.filter((d) => d.category === c).length}`; b.dataset.cat = c;
+      b.className = 'tab'; b.textContent = `${catName(c)} · ${CATALOG.filter((d) => d.category === c).length}`; b.dataset.cat = c;
       b.addEventListener('click', () => this.showCategory(c));
       tabs.appendChild(b); this.tabs[c] = b;
     }
     CATALOG.forEach((d, i) => {
       const b = document.createElement('button');
       b.className = 'chip'; b.dataset.index = i; b.dataset.cat = d.category;
-      b.innerHTML = `<i style="color:${rgbCss(d.color)};background:${rgbCss(d.color)}"></i>${d.name}`;
+      b.innerHTML = `<i style="color:${rgbCss(d.color)};background:${rgbCss(d.color)}"></i>${modelName(d)}`;
       b.addEventListener('click', () => this.selectModel(i));
       chips.appendChild(b); this.chips[i] = b;
     });
@@ -582,13 +619,13 @@ class App {
 
   guideItems(machine) {
     return [
-      ['snap', '🫰', '<b>Snap</b> — summon particles / dissolve'],
-      ['fist', '✊', machine ? '<b>Fist</b> — put it together' : '<b>Fist</b> — form the wonder'],
-      ['open', '✋', machine ? '<b>Open slowly</b> — explode it, see inside' : '<b>Open hand</b> — morph to the next wonder'],
-      ['twist', '🔄', '<b>Twist / raise hand</b> — rotate & tilt it'],
-      ...(machine ? [['point', '☝', '<b>Point</b> at a part to learn it · <b>pinch</b> 🤏 pulls it out']] : []),
-      ['zoom', '🙌', '<b>Two hands</b> apart / together — zoom'],
-      ['peace', '✌', '<b>Peace</b> — jump to the next model'],
+      ['snap', '🫰', tr('guide.snap')],
+      ['fist', '✊', machine ? tr('guide.fistM') : tr('guide.fistW')],
+      ['open', '✋', machine ? tr('guide.openM') : tr('guide.openW')],
+      ['twist', '🔄', tr('guide.twist')],
+      ...(machine ? [['point', '☝', tr('guide.point')]] : []),
+      ['zoom', '🙌', tr('guide.zoom')],
+      ['peace', '✌', tr('guide.peace')],
     ];
   }
 
@@ -603,8 +640,8 @@ class App {
     const isM = isMachine(st.index);
     if (this.lastIndexShown !== st.index) {
       this.lastIndexShown = st.index;
-      $('cat').textContent = def.category; $('name').textContent = def.name; $('fact').textContent = def.fact || '';
-      $('bigTitle').querySelector('.t').textContent = def.name; $('bigTitle').querySelector('.s').textContent = def.fact || '';
+      $('cat').textContent = catName(def.category); $('name').textContent = modelName(def); $('fact').textContent = modelFact(def);
+      $('bigTitle').querySelector('.t').textContent = modelName(def); $('bigTitle').querySelector('.s').textContent = modelFact(def);
       $('explodeBox').hidden = !isM;
       this.chips.forEach((c, i) => c.classList.toggle('active', i === st.index));
       if (this.activeCat !== def.category) this.showCategory(def.category);
@@ -613,7 +650,7 @@ class App {
     const pill = $('statePill');
     if (pill.dataset.state !== st.state) { pill.dataset.state = st.state; pill.textContent = st.state; }
     const vis = ctl.handVisible(t), pose = vis ? (ctl.pinch ? 'pinch' : ctl.pose) : NONE;
-    const [emo, label] = pose === 'pinch' ? ['🤏', 'Pinch'] : POSE_UI[pose] || POSE_UI.other;
+    const [emo, label] = pose === 'pinch' ? ['🤏', tr('pose.pinch')] : POSE_UI[pose] || POSE_UI.other;
     const pt = `${emo} ${label}${ctl.secondVisible(t) ? ' + 🖐' : ''}`;
     if ($('posePill').textContent !== pt) $('posePill').textContent = pt;
     const op = vis ? ctl.openness : 0;
@@ -635,7 +672,7 @@ class App {
       card.querySelector('.swatch').style.background = rgbCss(L.color);
       card.querySelector('.pname').textContent = L.label;
       card.querySelector('.pinfo').textContent = L.info;
-      card.querySelector('.pmodel').textContent = `${def.name} · part ${this.sel + 1} of ${this.model.labels.length}`;
+      card.querySelector('.pmodel').textContent = tr('hud.partOf', modelName(def), this.sel + 1, this.model.labels.length);
     }
     card.classList.toggle('pulled', this.pulled);
     // quiz banner
@@ -643,22 +680,23 @@ class App {
     qb.hidden = !q;
     if (q) {
       const target = q.target >= 0 && this.model?.labels[q.target];
-      qb.querySelector('.q').textContent = q.done ? '🎓 Quiz finished' : target ? `🎓 Find: ${target.label}` : '🎓 Get ready…';
-      qb.querySelector('.qs').textContent = `question ${Math.max(q.asked, 1)} / ${q.total} · score ${q.score}`;
-      qb.querySelector('.qf').textContent = q.feedback || 'point at it with one finger (or click it)';
+      qb.querySelector('.q').textContent = q.done ? tr('quiz.finished') : target ? tr('quiz.find', target.label) : tr('quiz.ready');
+      qb.querySelector('.qs').textContent = tr('quiz.progress', Math.max(q.asked, 1), q.total, q.score);
+      qb.querySelector('.qf').textContent = q.feedback || tr('quiz.hint');
       qb.classList.toggle('good', q.feedback.startsWith('✅') || q.done);
       qb.classList.toggle('bad', q.feedback.startsWith('❌'));
     }
-    const cam = this.cam?.running ? `cam <b>${this.cam.fps.toFixed(0)}</b> fps · hands ${this.cam.delegate} ${this.cam.detectMs.toFixed(0)} ms` : 'camera off';
-    const extra = [Math.abs(this.zoom - 1) > 0.02 ? `zoom <b>${this.zoom.toFixed(2)}×</b>` : '', this.recorder.on ? `<span class="rec">● REC ${this.recorder.seconds().toFixed(0)} s</span>` : '', this.voiceOn ? '🎤 listening' : ''].filter(Boolean).join(' · ');
-    $('stats').innerHTML = `<b>${this.fps.toFixed(0)}</b> fps · <b>${(CFG.n / 1000).toFixed(0)}k</b> particles<br>${cam}${extra ? '<br>' + extra : ''}`;
+    const cam = this.cam?.running ? tr('hud.cam', this.cam.fps.toFixed(0), this.cam.delegate, this.cam.detectMs.toFixed(0)) : tr('hud.camOff');
+    const extra = [Math.abs(this.zoom - 1) > 0.02 ? tr('hud.zoom', this.zoom.toFixed(2)) : '', this.recorder.on ? `<span class="rec">${tr('hud.rec', this.recorder.seconds().toFixed(0))}</span>` : '', this.voiceOn ? tr('hud.listening') : ''].filter(Boolean).join(' · ');
+    const autoQ = this.autoQ.level > 0 ? ` ${tr('hud.autoQ', Math.round((CFG.dpr / this.baseDpr) * 100))}` : '';
+    $('stats').innerHTML = `${tr('hud.fps', this.fps.toFixed(0), (CFG.n / 1000).toFixed(0))}${autoQ}<br>${cam}${extra ? '<br>' + extra : ''}`;
     for (const e of st.events.splice(0)) {
-      const name = CATALOG[st.index].name;
-      if (e === 'snap') this.toast('🫰 Snap! Particles summoned');
-      else if (e === 'form') this.toast(isM ? `✊ Assembling: ${name}` : `✊ Forming ${name}`);
-      else if (e === 'next') this.toast(`✌ Next: ${name}`);
-      else if (e === 'select') this.toast(`→ ${name}`);
-      else if (e === 'dissolve') this.toast('💥 Dissolved');
+      const name = modelName(CATALOG[st.index]);
+      if (e === 'snap') { this.toast(tr('toast.snap')); this.sound.snap(); }
+      else if (e === 'form') { this.toast(isM ? tr('toast.assembling', name) : tr('toast.forming', name)); this.sound.whoosh(); }
+      else if (e === 'next') { this.toast(tr('toast.next', name)); this.sound.blip(); }
+      else if (e === 'select') { this.toast(tr('toast.select', name)); this.sound.blip(); }
+      else if (e === 'dissolve') { this.toast(tr('toast.dissolved')); this.sound.boom(); }
     }
   }
 
@@ -700,9 +738,10 @@ class App {
       else if (k === 'i') this.voiceCommand('what is this');
       else if (k === 'escape') { if (this.quiz) this.stopQuiz(); this.deselect(); }
       else if (k === 'r') this.toggle('autoRotate', 'bRotate');
-      else if (k === 'g') { this.toggle('handRotate', 'bHandRot'); this.toast(`🔄 Hand rotation ${this.handRotate ? 'on' : 'off'}`); }
+      else if (k === 'g') { this.toggle('handRotate', 'bHandRot'); this.toast(tr('toast.handRot', this.handRotate)); }
       else if (k === 'l') this.toggle('labelsOn', 'bLabels');
-      else if (k === 't') this.trails = !this.trails;
+      else if (k === 's') this.toggleSound();
+      else if (k === 't') { this.trails = !this.trails; this.updateSettingsUI(); }
       else if (k === 'c') this.toggleCamera();
       else if (k === 'd') this.toggleDemo();
       else if (k === 'h' || k === '?') $('help').hidden = !$('help').hidden;
@@ -723,11 +762,15 @@ class App {
     $('bCut').onclick = () => this.toggleCut();
     $('bQuiz').onclick = () => { if (this.quiz) this.stopQuiz(); else this.startQuiz(); };
     $('bVoice').onclick = () => this.toggleVoice();
+    $('bSound').onclick = () => this.toggleSound();
     $('bRec').onclick = () => this.toggleRecord();
     $('bHelp').onclick = () => { $('help').hidden = !$('help').hidden; };
+    $('bLang').onclick = () => setLang(LANG === 'ar' ? 'en' : 'ar');
+    $('bSettings').onclick = () => { $('settings').hidden = !$('settings').hidden; this.updateSettingsUI(); };
+    this.bindSettings();
     $('partClose').onclick = () => this.deselect();
     $('partPull').onclick = () => { if (this.sel >= 0) this.pulled = !this.pulled; };
-    $('partSpeak').onclick = () => { const L = this.model?.labels[this.sel]; if (L) { this.spoken.push(`${L.label}. ${L.info}.`); speak(`${L.label}. ${L.info}.`); } };
+    $('partSpeak').onclick = () => { const L = this.model?.labels[this.sel]; if (L) { this.spoken.push(`${L.label}. ${L.info}.`); speak(`${L.label}. ${L.info}.`, SPEAK_LANG); } };
     $('quizStop').onclick = () => this.stopQuiz();
     const slider = $('explodeSlider');
     slider.addEventListener('input', () => { this.sliderActive = true; this.manualExplode = slider.value / 100; });
@@ -758,27 +801,60 @@ class App {
 
   toggle(prop, btn) { this[prop] = !this[prop]; this.$(btn).classList.toggle('on', this[prop]); }
 
+  // ------------------------------------------------------------ settings panel
+  bindSettings() {
+    const $ = this.$;
+    for (const b of $('setLang').querySelectorAll('button')) b.onclick = () => { if (b.dataset.lang !== LANG) setLang(b.dataset.lang); };
+    for (const b of $('setN').querySelectorAll('button')) b.onclick = () => {
+      const n = parseInt(b.dataset.n, 10);
+      if (n === CFG.n) return;
+      try { localStorage.setItem('ws.n', String(n)); } catch { /* ignore */ }
+      const u = new URL(location.href);
+      u.searchParams.set('n', String(n));
+      u.searchParams.set('model', String(this.ctl.state.index));
+      location.href = u.toString();
+    };
+    $('setSound').onchange = () => this.toggleSound();
+    $('setAutoQ').onchange = () => {
+      this.autoQ.on = $('setAutoQ').checked;
+      try { localStorage.setItem('ws.autoq', this.autoQ.on ? '1' : '0'); } catch { /* ignore */ }
+      if (!this.autoQ.on && this.autoQ.level > 0) { this.autoQ.level = 0; CFG.dpr = this.baseDpr; this.resize(); }
+    };
+    $('setTrails').onchange = () => { this.trails = $('setTrails').checked; };
+    this.updateSettingsUI();
+  }
+  updateSettingsUI() {
+    const $ = this.$;
+    for (const b of $('setLang').querySelectorAll('button')) b.classList.toggle('active', b.dataset.lang === LANG);
+    for (const b of $('setN').querySelectorAll('button')) b.classList.toggle('active', parseInt(b.dataset.n, 10) === CFG.n);
+    $('setSound').checked = this.sound.enabled;
+    $('setAutoQ').checked = this.autoQ.on;
+    $('setTrails').checked = this.trails;
+    $('bSound').classList.toggle('on', this.sound.enabled);
+    $('bSound').textContent = this.sound.enabled ? '🔊' : '🔇';
+  }
+
   async startCamera() {
     const msg = this.$('startMsg');
     try {
       this.cam = this.cam || new HandCamera(this.video);
       await this.cam.start((s) => { msg.textContent = s; if (s) this.toast(s); });
       this.camOn = true; this.$('bCam').classList.add('on');
-      this.toast('📷 Camera on — snap your fingers!');
+      this.toast(tr('toast.camOn'));
       return true;
     } catch (e) {
       console.error(e);
-      const text = e.name === 'NotAllowedError' ? 'Camera permission was denied — you can still use the keyboard, mouse and demo.'
-        : e.name === 'NotFoundError' ? 'No camera found — you can still use the keyboard, mouse and demo.' : `Camera error: ${e.message}`;
+      const text = e.name === 'NotAllowedError' ? tr('toast.camDenied')
+        : e.name === 'NotFoundError' ? tr('toast.camMissing') : tr('toast.camError', e.message);
       msg.textContent = text; this.toast(text);
       this.cam?.stop(); this.cam = null; this.camOn = false;
       return false;
     }
   }
-  stopCamera() { this.cam?.stop(); this.cam = null; this.camOn = false; this.hasVideo = false; this.$('bCam').classList.remove('on'); this.toast('Camera off'); }
+  stopCamera() { this.cam?.stop(); this.cam = null; this.camOn = false; this.hasVideo = false; this.$('bCam').classList.remove('on'); this.toast(tr('toast.camOff')); }
   toggleCamera() { if (this.camOn) this.stopCamera(); else this.startCamera(); }
 
-  toggleDemo() { if (this.demo) this.stopDemo(); else { this.demo = new Demo(this); this.$('bDemo').classList.add('on'); this.toast('▶ Demo — synthetic hand'); } }
+  toggleDemo() { if (this.demo) this.stopDemo(); else { this.demo = new Demo(this); this.$('bDemo').classList.add('on'); this.toast(tr('toast.demo')); } }
   stopDemo() { if (!this.demo) return; this.demo = null; this.demoHand = undefined; this.$('bDemo').classList.remove('on'); this.ctl.onHands([], this.t); }
 
   // ------------------------------------------------------------ deterministic stepping (tests)
@@ -800,6 +876,7 @@ class App {
 
 // ---------------------------------------------------------------- boot
 function boot() {
+  applyStatic();                                                             // Arabic UI + RTL when lang=ar
   let app;
   try { app = new App(); }
   catch (e) {
@@ -811,9 +888,13 @@ function boot() {
   const start = document.getElementById('start');
   const hideStart = () => { start.hidden = true; };
   document.getElementById('bStartCam').onclick = async () => { if (await app.startCamera()) hideStart(); };
-  document.getElementById('bStartNoCam').onclick = () => { hideStart(); app.toast('Keyboard: Space = snap · F = fist · O = open · E = explode · D = demo · H = help'); };
+  document.getElementById('bStartNoCam').onclick = () => { hideStart(); app.toast(tr('toast.keys')); };
   if (CFG.autostart === 'camera') { hideStart(); app.startCamera(); }
   else if (CFG.autostart === 'nocamera' || CFG.manual) hideStart();
+  // offline support (PWA): network-first service worker; skipped in test (manual) mode
+  if ('serviceWorker' in navigator && !CFG.manual && location.protocol.startsWith('http')) {
+    navigator.serviceWorker.register('sw.js').catch(() => {});
+  }
 
   window.wonderSnap = {
     app, CATALOG, CFG, synth: synthHand,

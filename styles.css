@@ -135,9 +135,31 @@ kbd { font-family: inherit; font-size: 11px; padding: 1px 6px; border: 1px solid
 .start-buttons .primary { background: linear-gradient(90deg, rgba(102, 224, 255, 0.35), rgba(255, 209, 102, 0.3)); border-color: rgba(102, 224, 255, 0.6); font-weight: 700; }
 .start-msg { min-height: 1.4em; margin-top: 12px !important; color: var(--accent-2) !important; }
 
+/* ---------- settings panel */
+.settings { position: fixed; top: 176px; right: 16px; width: 330px; padding: 14px 16px; z-index: 8; font-size: 13px; }
+.settings[hidden] { display: none; }
+.settings h2 { margin: 0 0 10px; font-size: 15px; }
+.settings .srow { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin: 10px 0; }
+.settings .srow.check { justify-content: flex-start; cursor: pointer; color: var(--text); }
+.settings .srow.check input { accent-color: var(--accent); }
+.settings .seg { display: flex; gap: 4px; flex-wrap: wrap; }
+.settings .seg button { font-size: 12px; padding: 4px 10px; border-radius: 8px; background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); }
+.settings .seg button:hover { border-color: rgba(102, 224, 255, 0.45); }
+.settings .seg button.active { background: rgba(102, 224, 255, 0.16); border-color: var(--accent); color: #fff; }
+.settings .shint { color: var(--muted); font-size: 11px; margin: 8px 0 0; }
+
+/* ---------- RTL (Arabic). Panels keep their screen positions; only the text direction flips. */
+[dir="rtl"] .steps { text-align: right; padding-left: 0; padding-right: 22px; }
+[dir="rtl"] .now .cat, [dir="rtl"] .k, [dir="rtl"] .tab { letter-spacing: 0; }
+[dir="rtl"] .brand-name, [dir="rtl"] .pill { letter-spacing: 0; }
+[dir="rtl"] .guide li { grid-template-columns: 30px 1fr; }
+[dir="rtl"] .big-title { text-align: left; }
+[dir="rtl"] .help td:first-child { white-space: normal; }
+
 @media (max-width: 820px) {
   .panel { width: calc(100vw - 32px); left: 16px; top: auto; bottom: 86px; max-height: 38vh; }
   .brand-sub { display: none; }
   .big-title { right: 16px; top: 70px; }
   .help { width: calc(100vw - 32px); }
+  .settings { width: calc(100vw - 32px); }
 }
